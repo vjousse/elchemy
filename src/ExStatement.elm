@@ -1,6 +1,7 @@
 module ExStatement exposing (..)
 
 import Ast
+import Code exposing (..)
 import Ast.Statement exposing (..)
 import Ast.Expression exposing (..)
 import Ast.BinOp exposing (operators)
@@ -32,31 +33,32 @@ moduleStatement s =
             crash "First statement must be module declaration"
 
 
-elixirS : Context -> Statement -> ( Context, String )
+elixirS : Code -> Statement -> Code
 elixirS c s =
     case s of
         InfixDeclaration _ _ _ ->
-            ( c, "" )
+            c
 
         TypeDeclaration (TypeConstructor [ name ] _) types ->
-            (,) c <|
-                (ind c.indent)
-                    ++ "@type "
-                    ++ toSnakeCase True name
-                    ++ " :: "
-                    ++ (map (ExType.uniontype c) types |> String.join " | ")
-                    ++ "\n"
+            c
+                |+ (ind c.context.indent)
+                |+ "@type "
+                |+ toSnakeCase True name
+                |+ " :: "
+                |+ (List.map (ExType.uniontype c) types |> String.join " | ")
+                |+ "\n"
 
         TypeAliasDeclaration _ _ ->
-            ( c, "" )
+            c
 
         (FunctionTypeDeclaration name ((TypeApplication _ _) as t)) as def ->
             let
                 definition =
                     getTypeDefinition def
             in
-                (,) (addTypeDefinition c name definition) <|
-                    case isOperator name of
+                c
+                    <||> (addTypeDefinition c name definition)
+                    |+ case isOperator name of
                         Builtin ->
                             -- TODO implement operator specs
                             ""
@@ -103,8 +105,9 @@ elixirS c s =
                 definition =
                     getTypeDefinition def
             in
-                (,) (addTypeDefinition c name definition) <|
-                    case isOperator name of
+                c
+                    <||> (addTypeDefinition c name definition)
+                    |+ case isOperator name of
                         Builtin ->
                             -- TODO implement operator specs
                             ""
@@ -130,10 +133,10 @@ elixirS c s =
                                 )
 
         (FunctionDeclaration name args body) as fd ->
-            (,) c <|
-                if name == "meta" && args == [] then
+            c
+                |+ if name == "meta" && args == [] then
                     ExExpression.generateMeta body
-                else
+                   else
                     case body of
                         Access (Variable ("Native" :: rest)) [ call ] ->
                             ExExpression.generateFfi
@@ -146,7 +149,7 @@ elixirS c s =
                                             >> typeAplicationToList
                                         )
                                     |> Maybe.withDefault []
-                                    |> map typeAplicationToList
+                                    |> List.map typeAplicationToList
                                 )
                                 (Application
                                     (Application (Variable [ "ffi" ])
@@ -166,7 +169,7 @@ elixirS c s =
                                             >> typeAplicationToList
                                         )
                                     |> Maybe.withDefault []
-                                    |> map typeAplicationToList
+                                    |> List.map typeAplicationToList
                                 )
                                 app
 
@@ -181,7 +184,7 @@ elixirS c s =
                                             >> typeAplicationToList
                                         )
                                     |> Maybe.withDefault []
-                                    |> map typeAplicationToList
+                                    |> List.map typeAplicationToList
                                 )
                                 app
 
@@ -215,10 +218,10 @@ elixirS c s =
                             ++ "@doc \"\"\"\n "
                             ++ (content
                                     |> String.lines
-                                    |> map (maybeDoctest c)
-                                    |> map (Helpers.escape)
-                                    |> map (flip (++) (ind c.indent))
-                                    |> map trimIndentations
+                                    |> List.map (maybeDoctest c)
+                                    |> List.map (Helpers.escape)
+                                    |> List.map (flip (++) (ind c.indent))
+                                    |> List.map trimIndentations
                                     |> String.join ""
                                     -- Drop an unnecessary \n at the end
                                     |> String.dropRight 1
@@ -230,7 +233,7 @@ elixirS c s =
                     (,) c <|
                         (content
                             |> String.split "\n"
-                            |> map String.trim
+                            |> List.map String.trim
                             |> String.join "\n"
                             |> indAll c.indent
                         )
@@ -239,7 +242,7 @@ elixirS c s =
                     flip (,) "" <|
                         (content
                             |> Regex.split All (regex "\\s+")
-                            |> map (String.split ":+")
+                            |> List.map (String.split ":+")
                             |> filterMap
                                 (\flag ->
                                     case flag of
@@ -283,7 +286,7 @@ elixirS c s =
                     ++ "import "
                     ++ modulePath path
                     ++ ", only: ["
-                    ++ (map subsetExport exports |> foldl (++) [] |> String.join ",")
+                    ++ (List.map subsetExport exports |> foldl (++) [] |> String.join ",")
                     ++ "]"
 
         ImportStatement path Nothing (Just AllExport) ->

@@ -6,6 +6,7 @@ import List exposing (..)
 import Regex exposing (..)
 import Dict exposing (Dict)
 import ExReserved
+import Code exposing (..)
 
 
 type MaybeUpper
@@ -76,10 +77,15 @@ ind i =
     "\n" ++ (List.repeat ((i + 1) * 2) " " |> String.join "")
 
 
+ind_ : Code -> Int -> String
+ind_ c plus =
+    ind (c.context.indent + plus)
+
+
 prependAll : String -> String -> String
 prependAll with target =
     String.lines target
-        |> map
+        |> List.map
             (\line ->
                 if String.trim line == "" then
                     line
@@ -218,8 +224,8 @@ generateArguments =
 generateArguments_ : String -> Int -> List String
 generateArguments_ str n =
     List.range 1 n
-        |> map toString
-        |> map ((++) str)
+        |> List.map toString
+        |> List.map ((++) str)
 
 
 unescape : String -> String
@@ -235,14 +241,14 @@ escape s =
 modulePath : List String -> String
 modulePath list =
     list
-        |> map
+        |> List.map
             (\a ->
                 if isUpper a then
                     a
                 else
                     toSnakeCase True a
             )
-        |> map maybeReplaceStd
+        |> List.map maybeReplaceStd
         |> String.join "."
 
 

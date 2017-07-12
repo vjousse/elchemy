@@ -1,8 +1,9 @@
 module Compiler exposing (..)
 
 import Ast
+import Code exposing (..)
 import Ast.Statement exposing (Statement)
-import List exposing (..)
+import List
 import Helpers exposing (..)
 import ExContext exposing (Context, Aliases)
 import ExAlias
@@ -55,20 +56,20 @@ tree m =
                                 Debug.crash "Failed getting context"
 
                             Just c ->
-                                getCode c a
+                                (getCode c a).product
                    )
 
         multiple ->
             let
                 files =
                     multiple
-                        |> map getName
-                        |> map (\( name, code ) -> ( name, parse name code ))
+                        |> List.map getName
+                        |> List.map (\( name, code ) -> ( name, parse name code ))
 
                 wContexts =
                     files
-                        |> map (\( name, ast ) -> ( name, getContext ast ))
-                        |> filterMap
+                        |> List.map (\( name, ast ) -> ( name, getContext ast ))
+                        |> List.filterMap
                             (\a ->
                                 case a of
                                     ( _, ( Nothing, _ ) ) ->
@@ -80,24 +81,24 @@ tree m =
 
                 commonAliases =
                     wContexts
-                        |> map (\( name, ctx, ast ) -> ctx.aliases)
+                        |> List.map (\( name, ctx, ast ) -> ctx.aliases)
                         |> getCommonAliases
 
                 wTrueContexts =
                     wContexts
-                        |> map (\( name, c, ast ) -> ( name, { c | aliases = commonAliases }, ast ))
+                        |> List.map (\( name, c, ast ) -> ( name, { c | aliases = commonAliases }, ast ))
             in
                 wTrueContexts
-                    |> map
+                    |> List.map
                         (\( name, c, ast ) ->
-                            ">>>>" ++ name ++ "\n" ++ getCode c ast
+                            ">>>>" ++ name ++ "\n" ++ (getCode c ast).product
                         )
                     |> String.join "\n"
 
 
 getCommonAliases : List Aliases -> Aliases
 getCommonAliases a =
-    foldl
+    List.foldl
         (\aliases acc ->
             Dict.merge
                 Dict.insert
@@ -133,25 +134,31 @@ getContext statements =
                 ( Just (ExAlias.getAliases base statements), statements )
 
 
-aggregateStatements : Statement -> ( Context, String ) -> ( Context, String )
-aggregateStatements s ( c, code ) =
+aggregateStatements : Statement -> Code -> Code
+aggregateStatements s code =
     let
         ( newC, newCode ) =
-            ExStatement.elixirS c s
+            ExStatement.elixirS code s
     in
-        ( newC, code ++ newCode )
+        code
+            <||> (always newC)
+            |+ newCode
 
 
-getCode : Context -> List Statement -> String
+getCode : Context -> List Statement -> Code
 getCode context statements =
-    ("# Compiled using Elchemy v" ++ version)
-        ++ "\n"
-        ++ ("defmodule " ++ context.mod ++ " do")
-        ++ glueStart
-        ++ ((List.foldl (aggregateStatements) ( context, "" ) statements)
-                |> Tuple.second
-           )
-        ++ glueEnd
+    let
+        code =
+            Code.empty context
+    in
+        code
+            |+ "# Compiled using Elchemy v"
+            |+ version
+            |+ "\n"
+            |+ ("defmodule " ++ context.mod ++ " do")
+            |+ glueStart
+            |> (\c -> List.foldl aggregateStatements c statements)
+            |+ glueEnd
 
 
 parse : String -> String -> List Statement
