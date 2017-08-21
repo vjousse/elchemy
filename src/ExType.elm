@@ -5,7 +5,6 @@ import Ast.Expression exposing (..)
 import Helpers exposing (..)
 import List exposing (..)
 import ExContext exposing (Context, indent)
-import ExAlias
 
 
 flattenTypeApplication : Type -> List Type
@@ -74,7 +73,7 @@ elixirT flatten c t =
         TypeConstructor t args ->
             case lastAndRest t of
                 ( Just last, a ) ->
-                    ExAlias.maybeAlias c.aliases last
+                    ExContext.getAlias c.mod last c
                         |> Maybe.andThen
                             (\ali ->
                                 if ali.aliasType == ExContext.TypeAlias then
@@ -142,7 +141,7 @@ typeRecordFields c flatten t =
         TypeRecordConstructor (TypeConstructor [ name ] args) fields ->
             let
                 inherited =
-                    ExAlias.maybeAlias c.aliases name
+                    ExContext.getAlias c.mod name c
                         |> Maybe.map (\{ getTypeBody } -> getTypeBody args)
                         |> Maybe.map (typeRecordFields c flatten)
             in
@@ -170,6 +169,9 @@ typeRecordFields c flatten t =
                 (fields)
             )
 
+        TypeRecordConstructor (TypeTuple [ a ]) fields ->
+            typeRecordFields c flatten (TypeRecordConstructor a fields)
+
         TypeRecordConstructor ((TypeRecordConstructor _ _) as tr) fields ->
             (map
                 (\( k, v ) ->
@@ -178,6 +180,14 @@ typeRecordFields c flatten t =
                 (fields)
             )
                 ++ typeRecordFields c flatten tr
+
+        (TypeRecord fields) as tr ->
+            (map
+                (\( k, v ) ->
+                    k ++ ": " ++ elixirT flatten c v
+                )
+                (fields)
+            )
 
         any ->
             Debug.crash ("Wrong type record constructor " ++ toString any)
@@ -197,7 +207,7 @@ elixirTypeConstructor flatten c name args =
             "String.t"
 
         ( "Char", [] ) ->
-            "char_list"
+            "integer"
 
         ( "Bool", [] ) ->
             "boolean"
@@ -214,6 +224,14 @@ elixirTypeConstructor flatten c name args =
         ( "List", [ t ] ) ->
             "list(" ++ elixirT flatten c t ++ ")"
 
+        ( "Dict", [ key, val ] ) ->
+            "%{}"
+
+        -- "%{required("
+        --     ++ elixirT flatten c key
+        --     ++ ") => "
+        --     ++ elixirT flatten c val
+        --     ++ "}"
         ( "Maybe", [ t ] ) ->
             "{" ++ elixirT flatten c t ++ "} | nil"
 
@@ -349,7 +367,7 @@ constructApplication list =
 
 aliasOr : Context -> String -> List Type -> String -> String
 aliasOr c name args default =
-    ExAlias.maybeAlias c.aliases name
+    ExContext.getAlias c.mod name c
         |> Maybe.map
             (\{ mod, getTypeBody, aliasType } ->
                 if mod == c.mod then

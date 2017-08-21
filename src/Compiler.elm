@@ -1,4 +1,10 @@
-module Compiler exposing (..)
+module Compiler exposing (version, tree)
+
+{-| Module responsible for compiling Elm code to Elixir
+
+@docs version, tree
+
+-}
 
 import Ast
 import Ast.Statement exposing (Statement)
@@ -7,13 +13,15 @@ import Helpers exposing (..)
 import ExContext exposing (Context, Aliases)
 import ExAlias
 import ExStatement
-import Dict
+import Dict exposing (Dict)
 import Regex exposing (..)
 
 
+{-| Returns current version
+-}
 version : String
 version =
-    "0.4.5"
+    "0.4.32"
 
 
 glueStart : String
@@ -42,9 +50,11 @@ getName file =
             ( "", "" )
 
 
+{-| Transforms a code in Elm to code in Elixir
+-}
 tree : String -> String
 tree m =
-    case String.split ">>>>" m of
+    case String.split (">>" ++ ">>") m of
         [ single ] ->
             single
                 |> parse "NoName.elm"
@@ -81,22 +91,36 @@ tree m =
                 commonAliases =
                     wContexts
                         |> map (\( name, ctx, ast ) -> ctx.aliases)
-                        |> getCommonAliases
+                        |> getCommonImports
+
+                commonTypes =
+                    wContexts
+                        |> map (\( name, ctx, ast ) -> ctx.types)
+                        |> getCommonImports
 
                 wTrueContexts =
                     wContexts
-                        |> map (\( name, c, ast ) -> ( name, { c | aliases = commonAliases }, ast ))
+                        |> map
+                            (\( name, c, ast ) ->
+                                ( name
+                                , { c
+                                    | aliases = commonAliases
+                                    , types = commonTypes
+                                  }
+                                , ast
+                                )
+                            )
             in
                 wTrueContexts
                     |> map
                         (\( name, c, ast ) ->
-                            ">>>>" ++ name ++ "\n" ++ getCode c ast
+                            ">>" ++ ">>" ++ name ++ "\n" ++ getCode c ast
                         )
                     |> String.join "\n"
 
 
-getCommonAliases : List Aliases -> Aliases
-getCommonAliases a =
+getCommonImports : List (Dict String v) -> Dict String v
+getCommonImports a =
     foldl
         (\aliases acc ->
             Dict.merge
@@ -114,7 +138,14 @@ getCommonAliases a =
 typeAliasDuplicate : comparable -> a -> a -> Dict.Dict comparable a -> Dict.Dict comparable a
 typeAliasDuplicate k v v2 =
     if v /= v2 then
-        Debug.crash ("You can't have two different type aliases for " ++ toString k)
+        Debug.crash
+            ("You can't have two different type aliases for "
+                ++ toString k
+                ++ "\nThese are: "
+                ++ toString v
+                ++ "\nand\n"
+                ++ toString v2
+            )
     else
         Dict.insert k v
 
@@ -187,3 +218,13 @@ removeComments =
     -- Need to remove the second one
     Regex.replace All (regex "\\s--.*\n") (always "")
         >> Regex.replace All (regex "\n +\\w+ : .*") (always "")
+
+
+crunchSplitLines : String -> String
+crunchSplitLines =
+    Regex.replace All (regex "(?:({-(?:\\n|.)*?-})|([\\w\\])}\"][\\t ]*)\\n[\\t ]+((?!.*\\s->\\s)(?!.*=)(?!.*\\bin\\b)[\\w[({\"]))") <|
+        \m ->
+            m.submatches
+                |> map (Maybe.map (flip (++) " "))
+                |> filterMap identity
+                |> String.join " "

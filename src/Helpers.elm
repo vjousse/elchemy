@@ -5,7 +5,6 @@ import Tuple exposing (..)
 import List exposing (..)
 import Regex exposing (..)
 import Dict exposing (Dict)
-import ExReserved
 
 
 type MaybeUpper
@@ -29,7 +28,7 @@ toSnakeCase isntAtom s =
     let
         string =
             if isntAtom then
-                ExReserved.maybeReplaceReserved s
+                maybeReplaceReserved s
             else
                 s
     in
@@ -71,9 +70,14 @@ isCapitilzed s =
         |> Maybe.withDefault False
 
 
+indNoNewline : Int -> String
+indNoNewline i =
+    List.repeat ((i + 1) * 2) " " |> String.join ""
+
+
 ind : Int -> String
 ind i =
-    "\n" ++ (List.repeat ((i + 1) * 2) " " |> String.join "")
+    "\n" ++ indNoNewline i
 
 
 prependAll : String -> String -> String
@@ -136,6 +140,8 @@ operators =
     , ( "<|", "" )
     , ( "<<", "" )
     , ( "|>", "|>" )
+    , ( "and", "and" )
+    , ( "or", "or" )
 
     -- Exception
     , ( "%", "rem" )
@@ -144,8 +150,7 @@ operators =
     , ( "//", "" )
 
     -- Exception
-    , ( "rem", "" )
-
+    --, ( "rem", "rem" )
     -- Exception
     , ( "^", "" )
 
@@ -202,7 +207,7 @@ translateOperator op =
             key
 
         _ ->
-            ExReserved.replaceOp op
+            replaceOp op
 
 
 trimIndentations : String -> String
@@ -232,6 +237,11 @@ escape s =
     Regex.replace All (regex "\\\\") (always "\\\\") s
 
 
+ops : List ( Int, Char )
+ops =
+    [ '+', '-', '/', '*', '=', '.', '$', '<', '>', ':', '&', '|', '^', '?', '%', '#', '@', '~', '!' ] |> List.indexedMap (,)
+
+
 modulePath : List String -> String
 modulePath list =
     list
@@ -246,25 +256,65 @@ modulePath list =
         |> String.join "."
 
 
-isStdModule : String -> Bool
-isStdModule a =
-    List.member a
-        [ "Basics"
-        , "List"
-        , "String"
-        , "Maybe"
-        , "Char"
-        , "Result"
-        , "Tuple"
-        ]
-
-
 maybeReplaceStd : String -> String
 maybeReplaceStd s =
     if isStdModule s then
         "X" ++ s
     else
         s
+
+
+isStdModule : String -> Bool
+isStdModule a =
+    List.member a
+        [ "Basics"
+        , "Bitwise"
+        , "Char"
+        , "Date"
+        , "Debug"
+        , "Dict"
+        , "List"
+        , "String"
+        , "Maybe"
+        , "Regex"
+        , "Result"
+        , "Set"
+        , "String"
+        , "Tuple"
+        ]
+
+
+reservedWords : List String
+reservedWords =
+    [ "fn", "do", "end", "cond", "receive" ]
+
+
+replaceOp : String -> String
+replaceOp op =
+    String.toList op
+        |> List.map replaceOp_
+        |> String.join ""
+        |> flip (++) "__"
+
+
+replaceOp_ : Char -> String
+replaceOp_ op =
+    case
+        List.filter (\( i, o ) -> op == o) ops
+    of
+        ( index, _ ) :: _ ->
+            "op" ++ toString index
+
+        _ ->
+            Debug.crash "Illegal op"
+
+
+maybeReplaceReserved : String -> String
+maybeReplaceReserved a =
+    if List.member a reservedWords then
+        a ++ "__"
+    else
+        a
 
 
 maybeOr : Maybe a -> Maybe a -> Maybe a
@@ -275,3 +325,16 @@ maybeOr m1 m2 =
 
         Nothing ->
             m2
+
+
+{-| Gives a String representation of module path
+-}
+modulePathName : List String -> String
+modulePathName =
+    String.join "."
+
+
+{-| Nicer syntax for tuples
+-}
+(=>) =
+    (,)

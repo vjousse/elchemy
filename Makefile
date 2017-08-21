@@ -10,7 +10,7 @@ release:
 	cp -r example/ stable/
 
 compile:
-	elm-make Main.elm --output compiled.js
+	elm-make Main.elm --yes --output compiled.js
 	sed 's/var Elm = {}/&; \
 	var fs = require(\"fs\"); \
 	var a = fs.readFileSync(process.argv[2]).toString(); \
@@ -35,7 +35,7 @@ compile-std-watch:
 	find elchemy-core -name "*.elm" | grep -v ".#" | grep -v "elm-stuff" | entr make compile-std
 
 compile-std-tests-watch:
-	find elchemy-core -name "*.elm" | grep -v ".#" | grep -v "elm-stuff" | entr bash -c "make compile && make compile-std && make test-std"
+	find elchemy-core \( -name "*.elm" -or -name '*.ex' \) | grep -v "elchemy.ex" | grep -v ".#" | grep -v "elm-stuff" | entr bash -c "make compile && make compile-std && make test-std"
 
 tests-watch:
 	find . -name "*.elm" | grep -v ".#" | grep -v "elm-stuff" | entr elm-test
