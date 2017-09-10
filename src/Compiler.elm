@@ -1,26 +1,31 @@
-module Compiler exposing (..)
+module Compiler exposing (version, tree)
+
+{-| Module responsible for compiling Elm code to Elixir
+
+@docs version, tree
+
+-}
 
 import Ast
-import Ast.Statement exposing (Statement)
-import List exposing (..)
-import Helpers exposing (..)
-import ExContext exposing (Context, Aliases)
 import ExAlias
 import ExStatement
-import Dict
-import Regex exposing (..)
+import Dict exposing (Dict)
+import Helpers exposing (ind)
+import Ast.Statement exposing (Statement)
+import ExContext exposing (Context, Aliases)
+import Regex exposing (Regex, HowMany(..), regex)
 
 
+{-| Returns current version
+-}
 version : String
 version =
-    "0.4.5"
+    "0.4.40"
 
 
 glueStart : String
 glueStart =
-    (ind 0)
-        ++ "use Elchemy"
-        ++ "\n"
+    (ind 0) ++ "use Elchemy" ++ "\n"
 
 
 glueEnd : String
@@ -29,7 +34,9 @@ glueEnd =
         ++ String.trim
             """
          end
+
          """
+        ++ "\n"
 
 
 getName : String -> ( String, String )
@@ -42,9 +49,11 @@ getName file =
             ( "", "" )
 
 
+{-| Transforms a code in Elm to code in Elixir
+-}
 tree : String -> String
 tree m =
-    case String.split ">>>>" m of
+    case String.split (">>" ++ ">>") m of
         [ single ] ->
             single
                 |> parse "NoName.elm"
@@ -60,15 +69,31 @@ tree m =
 
         multiple ->
             let
+                count =
+                    Debug.log "Number of files" (List.length multiple)
+
                 files =
                     multiple
-                        |> map getName
-                        |> map (\( name, code ) -> ( name, parse name code ))
+                        |> List.map getName
+                        |> List.indexedMap (,)
+                        |> List.map
+                            (\( i, ( name, code ) ) ->
+                                let
+                                    _ =
+                                        flip Debug.log name <|
+                                            "Parsing "
+                                                ++ toString (count - i)
+                                                ++ "/"
+                                                ++ toString count
+                                                ++ " # "
+                                in
+                                    ( name, parse name code )
+                            )
 
                 wContexts =
                     files
-                        |> map (\( name, ast ) -> ( name, getContext ast ))
-                        |> filterMap
+                        |> List.map (\( name, ast ) -> ( name, getContext ast ))
+                        |> List.filterMap
                             (\a ->
                                 case a of
                                     ( _, ( Nothing, _ ) ) ->
@@ -80,41 +105,57 @@ tree m =
 
                 commonAliases =
                     wContexts
-                        |> map (\( name, ctx, ast ) -> ctx.aliases)
-                        |> getCommonAliases
+                        |> List.map (\( name, ctx, ast ) -> ctx.aliases)
+                        |> getCommonImports
+
+                commonTypes =
+                    wContexts
+                        |> List.map (\( name, ctx, ast ) -> ctx.types)
+                        |> getCommonImports
+
+                updateWithCommon ( name, c, ast ) =
+                    ( name, { c | aliases = commonAliases, types = commonTypes }, ast )
 
                 wTrueContexts =
-                    wContexts
-                        |> map (\( name, c, ast ) -> ( name, { c | aliases = commonAliases }, ast ))
+                    List.map updateWithCommon wContexts
+
+                compileWithIndex ( i, ( name, c, ast ) ) =
+                    let
+                        _ =
+                            flip Debug.log name <|
+                                "Compiling "
+                                    ++ toString (count - i)
+                                    ++ "/"
+                                    ++ toString count
+                                    ++ " # "
+                    in
+                        ">>" ++ ">>" ++ name ++ "\n" ++ getCode c ast
             in
                 wTrueContexts
-                    |> map
-                        (\( name, c, ast ) ->
-                            ">>>>" ++ name ++ "\n" ++ getCode c ast
-                        )
+                    |> List.indexedMap (,)
+                    |> List.map compileWithIndex
                     |> String.join "\n"
 
 
-getCommonAliases : List Aliases -> Aliases
-getCommonAliases a =
-    foldl
-        (\aliases acc ->
-            Dict.merge
-                Dict.insert
-                typeAliasDuplicate
-                Dict.insert
-                acc
-                aliases
-                Dict.empty
-        )
-        (Dict.empty)
-        a
+getCommonImports : List (Dict String v) -> Dict String v
+getCommonImports a =
+    let
+        merge aliases acc =
+            Dict.merge Dict.insert typeAliasDuplicate Dict.insert acc aliases Dict.empty
+    in
+        List.foldl merge Dict.empty a
 
 
 typeAliasDuplicate : comparable -> a -> a -> Dict.Dict comparable a -> Dict.Dict comparable a
 typeAliasDuplicate k v v2 =
     if v /= v2 then
-        Debug.crash ("You can't have two different type aliases for " ++ toString k)
+        Debug.crash <|
+            "You can't have two different type aliases for "
+                ++ toString k
+                ++ "\nThese are: "
+                ++ toString v
+                ++ "\nand\n"
+                ++ toString v2
     else
         Dict.insert k v
 
@@ -161,8 +202,8 @@ parse fileName m =
             statements
 
         Err ( (), { input, position }, [ msg ] ) ->
-            Debug.crash
-                ("]ERR> Compilation error in:\n "
+            Debug.crash <|
+                "]ERR> Compilation error in:\n "
                     ++ fileName
                     ++ "\nat:\n "
                     ++ (input
@@ -171,7 +212,6 @@ parse fileName m =
                             |> String.join "\n"
                        )
                     ++ "\n"
-                )
 
         err ->
             Debug.crash (toString err)
@@ -187,3 +227,13 @@ removeComments =
     -- Need to remove the second one
     Regex.replace All (regex "\\s--.*\n") (always "")
         >> Regex.replace All (regex "\n +\\w+ : .*") (always "")
+
+
+crunchSplitLines : String -> String
+crunchSplitLines =
+    Regex.replace All (regex "(?:({-(?:\\n|.)*?-})|([\\w\\])}\"][\\t ]*)\\n[\\t ]+((?!.*\\s->\\s)(?!.*=)(?!.*\\bin\\b)[\\w[({\"]))") <|
+        \m ->
+            m.submatches
+                |> List.map (Maybe.map (flip (++) " "))
+                |> List.filterMap identity
+                |> String.join " "
